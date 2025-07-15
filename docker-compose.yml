@@ -1,0 +1,50 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=sqlite:////app/data/accounts.db
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - SMTP_SERVER=${SMTP_SERVER:-smtp.gmail.com}
+      - SMTP_USERNAME=${SMTP_USERNAME:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SECRET_KEY=${SECRET_KEY:-test-secret-key-change-in-production}
+      - ENVIRONMENT=development
+    volumes:
+      - ./data:/app/data
+      - ./uploads:/app/uploads
+      - ./logs:/app/logs
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - REACT_APP_API_URL=http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  e2e-tests:
+    build:
+      context: ./tests/selenium
+      dockerfile: Dockerfile
+    volumes:
+      - ./tests/selenium:/app/tests
+      - /tmp:/tmp
+    depends_on:
+      - backend
+      - frontend
+    environment:
+      - FRONTEND_URL=http://frontend:3000
+      - BACKEND_URL=http://backend:8000
+    profiles:
+      - testing
+    command: ["python", "-m", "pytest", "test_selenium_e2e.py", "-v", "--html=selenium_report.html", "--self-contained-html"]
