@@ -1,4 +1,4 @@
-# GDPR Account Deletion Assistant 🗑️
+# DataWipe 🗑️
 
 A comprehensive web application that helps users manage and delete their accounts across various online services in compliance with GDPR regulations.
 
@@ -239,7 +239,7 @@ This is a private repository. For contributions or questions, please contact the
 
 ## 📞 Support
 
-For technical support or questions about this GDPR Account Deletion Assistant, please check the troubleshooting section or review the comprehensive test suite results.
+For technical support or questions about DataWipe, please check the troubleshooting section or review the comprehensive test suite results.
 
 ---
 
