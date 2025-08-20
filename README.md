@@ -4,11 +4,13 @@ A comprehensive web application that helps users manage and delete their account
 
 ## 🚀 Features
 
-- **CSV Account Upload**: Import accounts from CSV files
+- **CSV Account Upload**: Import accounts from CSV files:
+  - Lastpass and Bitwarden accounts supported
 - **Account Management**: View, search, and organize discovered accounts
 - **Deletion Workflow**: Automated account deletion tasks
 - **Audit Trail**: Complete logging and audit functionality
 - **Email Integration**: SMTP support for automated communications
+  - supports SMTP and IMAP gateway with credentials (e.g. google apps passwords)
 - **Responsive Design**: Works on desktop, tablet, and mobile
 - **API Documentation**: Complete OpenAPI/Swagger documentation
 

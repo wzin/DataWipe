@@ -1,426 +1,431 @@
 import asyncio
-from typing import Dict, Any, Optional
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.chrome.options import Options
-from selenium.common.exceptions import TimeoutException, WebDriverException
-import time
-import random
-from urllib.parse import urlparse
+import os
+from typing import Dict, List, Optional, Any
+from datetime import datetime
+from pathlib import Path
+import json
+import base64
 
-from models import Account
-from config import settings
+from playwright.async_api import async_playwright, Page, Browser, BrowserContext
+from playwright.async_api import TimeoutError as PlaywrightTimeout
+
+from models import Account, DeletionTask
+from services.encryption_service import encryption_service
+from services.site_configs import SITE_CONFIGS
 
 
 class WebScraper:
-    """Web scraping service for automated account deletion"""
+    """Service for automated account deletion using Playwright"""
     
     def __init__(self):
-        self.driver = None
-        self.wait = None
+        self.browser: Optional[Browser] = None
+        self.context: Optional[BrowserContext] = None
+        self.screenshots_dir = Path("/app/data/screenshots")
+        self.screenshots_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Browser settings
+        self.headless = os.getenv("BROWSER_HEADLESS", "true").lower() == "true"
+        self.slow_mo = int(os.getenv("BROWSER_SLOW_MO", "0"))  # Milliseconds between actions
+        self.timeout = int(os.getenv("BROWSER_TIMEOUT", "30000"))  # Default 30 seconds
+        
+    async def initialize(self):
+        """Initialize Playwright browser"""
+        if not self.browser:
+            playwright = await async_playwright().start()
+            
+            # Use Chromium for better compatibility
+            self.browser = await playwright.chromium.launch(
+                headless=self.headless,
+                slow_mo=self.slow_mo,
+                args=[
+                    '--disable-blink-features=AutomationControlled',
+                    '--disable-dev-shm-usage',
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox'
+                ]
+            )
+            
+            # Create context with common settings
+            self.context = await self.browser.new_context(
+                viewport={'width': 1920, 'height': 1080},
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                locale='en-US',
+                timezone_id='America/New_York',
+                ignore_https_errors=True,
+                # Enable permissions
+                permissions=['geolocation', 'notifications'],
+                # Anti-detection measures
+                extra_http_headers={
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
+                }
+            )
+            
+            # Add stealth scripts to avoid detection
+            await self.context.add_init_script("""
+                // Override navigator.webdriver
+                Object.defineProperty(navigator, 'webdriver', {
+                    get: () => undefined
+                });
+                
+                // Override plugins
+                Object.defineProperty(navigator, 'plugins', {
+                    get: () => [1, 2, 3, 4, 5]
+                });
+                
+                // Override languages
+                Object.defineProperty(navigator, 'languages', {
+                    get: () => ['en-US', 'en']
+                });
+                
+                // Chrome specific
+                window.chrome = {
+                    runtime: {}
+                };
+                
+                // Permissions
+                const originalQuery = window.navigator.permissions.query;
+                window.navigator.permissions.query = (parameters) => (
+                    parameters.name === 'notifications' ?
+                        Promise.resolve({ state: Notification.permission }) :
+                        originalQuery(parameters)
+                );
+            """)
     
-    async def navigate_to_page(self, url: str) -> Optional[str]:
-        """Navigate to a page and return HTML content"""
+    async def cleanup(self):
+        """Clean up browser resources"""
+        if self.context:
+            await self.context.close()
+            self.context = None
+        if self.browser:
+            await self.browser.close()
+            self.browser = None
+    
+    async def delete_account(self, account: Account, task: DeletionTask) -> Dict[str, Any]:
+        """
+        Attempt to delete an account using web automation
+        
+        Returns:
+            Dict with success status, screenshots, and any error messages
+        """
+        await self.initialize()
+        
+        # Get site-specific configuration
+        site_config = self._get_site_config(account.site_url)
+        if not site_config:
+            return {
+                'success': False,
+                'error': f'No deletion configuration available for {account.site_name}',
+                'method': 'unknown'
+            }
+        
+        page = await self.context.new_page()
+        screenshots = []
         
         try:
-            driver = self._get_driver()
-            driver.get(url)
+            # Set timeout for this deletion attempt
+            page.set_default_timeout(self.timeout)
             
-            # Wait for page to load
-            await asyncio.sleep(random.uniform(2, 4))
+            # Navigate to login page
+            await page.goto(site_config.get('login_url', account.site_url))
+            await page.wait_for_load_state('networkidle')
             
-            # Get page content
-            html_content = driver.page_source
+            # Take initial screenshot
+            screenshot = await self._take_screenshot(page, account.id, 'login_page')
+            screenshots.append(screenshot)
             
-            driver.quit()
-            return html_content
+            # Perform login
+            login_success = await self._perform_login(
+                page, 
+                account.username,
+                encryption_service.decrypt_password(account.encrypted_password),
+                site_config
+            )
             
-        except Exception as e:
-            print(f"Error navigating to {url}: {e}")
-            if driver:
-                driver.quit()
-            return None
-    
-    async def execute_deletion(self, account: Account, analysis: Dict[str, Any], task_id: int) -> bool:
-        """Execute automated account deletion"""
-        
-        try:
-            driver = self._get_driver()
-            
-            # Navigate to deletion URL
-            deletion_url = analysis.get('deletion_url') or f"{account.site_url}/settings"
-            driver.get(deletion_url)
-            
-            # Wait for page load
-            await asyncio.sleep(random.uniform(2, 4))
-            
-            # Step 1: Login if required
-            login_success = await self._attempt_login(driver, account)
             if not login_success:
-                driver.quit()
-                return False
+                return {
+                    'success': False,
+                    'error': 'Failed to login to account',
+                    'screenshots': screenshots,
+                    'method': 'automated'
+                }
             
-            # Step 2: Navigate to deletion page
-            deletion_success = await self._navigate_to_deletion(driver, analysis)
-            if not deletion_success:
-                driver.quit()
-                return False
+            # Take post-login screenshot
+            screenshot = await self._take_screenshot(page, account.id, 'logged_in')
+            screenshots.append(screenshot)
             
-            # Step 3: Execute deletion
-            final_success = await self._execute_final_deletion(driver, analysis, account)
+            # Navigate to deletion page
+            deletion_result = await self._perform_deletion(page, site_config)
             
-            driver.quit()
-            return final_success
+            # Take final screenshot
+            screenshot = await self._take_screenshot(page, account.id, 'deletion_complete')
+            screenshots.append(screenshot)
             
+            return {
+                'success': deletion_result['success'],
+                'error': deletion_result.get('error'),
+                'screenshots': screenshots,
+                'method': 'automated',
+                'confirmation': deletion_result.get('confirmation_text')
+            }
+            
+        except PlaywrightTimeout as e:
+            return {
+                'success': False,
+                'error': f'Operation timed out: {str(e)}',
+                'screenshots': screenshots,
+                'method': 'automated'
+            }
         except Exception as e:
-            print(f"Error executing deletion for {account.site_name}: {e}")
-            if driver:
-                driver.quit()
-            return False
+            return {
+                'success': False,
+                'error': f'Unexpected error: {str(e)}',
+                'screenshots': screenshots,
+                'method': 'automated'
+            }
+        finally:
+            await page.close()
     
-    async def _attempt_login(self, driver: webdriver.Chrome, account: Account) -> bool:
-        """Attempt to log into the account"""
-        
+    async def _perform_login(self, page: Page, username: str, password: str, config: Dict) -> bool:
+        """Perform login using site-specific selectors"""
         try:
-            # Common login selectors
-            username_selectors = [
-                'input[name="username"]',
-                'input[name="email"]',
-                'input[type="email"]',
-                'input[id="username"]',
-                'input[id="email"]',
-                '#username',
-                '#email'
-            ]
+            # Wait for login form
+            await page.wait_for_selector(
+                config.get('username_selector', 'input[type="email"], input[type="text"]'),
+                timeout=10000
+            )
             
-            password_selectors = [
-                'input[name="password"]',
-                'input[type="password"]',
-                'input[id="password"]',
-                '#password'
-            ]
+            # Fill username
+            username_selector = config.get('username_selector', 'input[type="email"], input[type="text"]')
+            await page.fill(username_selector, username)
             
-            # Find username field
-            username_field = None
-            for selector in username_selectors:
+            # Fill password
+            password_selector = config.get('password_selector', 'input[type="password"]')
+            await page.fill(password_selector, password)
+            
+            # Handle "remember me" checkbox if specified
+            if config.get('uncheck_remember'):
+                remember_selector = config.get('remember_selector', 'input[type="checkbox"]')
                 try:
-                    username_field = driver.find_element(By.CSS_SELECTOR, selector)
-                    break
+                    await page.uncheck(remember_selector, timeout=2000)
                 except:
-                    continue
+                    pass  # Ignore if not found
             
-            if not username_field:
-                print("Could not find username field")
+            # Click login button
+            login_button = config.get('login_button_selector', 'button[type="submit"]')
+            await page.click(login_button)
+            
+            # Wait for navigation or success indicator
+            if config.get('login_success_url'):
+                await page.wait_for_url(config['login_success_url'], timeout=15000)
+            elif config.get('login_success_selector'):
+                await page.wait_for_selector(config['login_success_selector'], timeout=15000)
+            else:
+                # Generic wait for navigation
+                await page.wait_for_load_state('networkidle', timeout=15000)
+            
+            # Check for 2FA/MFA
+            if await self._check_for_2fa(page, config):
+                # For now, we'll return False as we don't handle 2FA yet
                 return False
             
-            # Find password field
-            password_field = None
-            for selector in password_selectors:
-                try:
-                    password_field = driver.find_element(By.CSS_SELECTOR, selector)
-                    break
-                except:
-                    continue
-            
-            if not password_field:
-                print("Could not find password field")
-                return False
-            
-            # Enter credentials
-            username_field.clear()
-            username_field.send_keys(account.username)
-            
-            await asyncio.sleep(random.uniform(0.5, 1.5))
-            
-            # Get decrypted password (implement in CSV parser)
-            password = "dummy_password"  # This would be decrypted
-            password_field.clear()
-            password_field.send_keys(password)
-            
-            await asyncio.sleep(random.uniform(0.5, 1.5))
-            
-            # Find and click login button
-            login_button_selectors = [
-                'button[type="submit"]',
-                'input[type="submit"]',
-                'button:contains("Log in")',
-                'button:contains("Sign in")',
-                '.login-button',
-                '#login-button'
-            ]
-            
-            for selector in login_button_selectors:
-                try:
-                    login_button = driver.find_element(By.CSS_SELECTOR, selector)
-                    login_button.click()
-                    break
-                except:
-                    continue
-            
-            # Wait for login to complete
-            await asyncio.sleep(random.uniform(3, 5))
-            
-            # Check if login was successful
-            # Look for common indicators of successful login
-            success_indicators = [
-                'dashboard',
-                'account',
-                'settings',
-                'profile',
-                'logout'
-            ]
-            
-            page_content = driver.page_source.lower()
-            login_success = any(indicator in page_content for indicator in success_indicators)
-            
-            # Also check if we're still on login page
-            login_indicators = ['login', 'sign in', 'password', 'username']
-            still_on_login = any(indicator in driver.current_url.lower() for indicator in login_indicators)
-            
-            return login_success and not still_on_login
+            return True
             
         except Exception as e:
             print(f"Login failed: {e}")
             return False
     
-    async def _navigate_to_deletion(self, driver: webdriver.Chrome, analysis: Dict[str, Any]) -> bool:
-        """Navigate to account deletion page"""
+    async def _check_for_2fa(self, page: Page, config: Dict) -> bool:
+        """Check if 2FA is required"""
+        two_fa_indicators = config.get('2fa_indicators', [
+            'input[type="tel"]',
+            'input[name*="code"]',
+            'input[name*="otp"]',
+            'input[placeholder*="code"]',
+            'text=/verification code/i',
+            'text=/two.factor/i',
+            'text=/2fa/i'
+        ])
         
-        try:
-            # Try to find deletion page link
-            deletion_links = [
-                'a[href*="delete"]',
-                'a[href*="close"]',
-                'a[href*="deactivate"]',
-                'a:contains("Delete Account")',
-                'a:contains("Close Account")',
-                'a:contains("Deactivate")'
-            ]
-            
-            for selector in deletion_links:
-                try:
-                    link = driver.find_element(By.CSS_SELECTOR, selector)
-                    link.click()
-                    await asyncio.sleep(random.uniform(2, 4))
+        for indicator in two_fa_indicators:
+            try:
+                if await page.locator(indicator).count() > 0:
                     return True
-                except:
-                    continue
-            
-            # If no direct link found, try settings first
-            settings_links = [
-                'a[href*="settings"]',
-                'a[href*="account"]',
-                'a[href*="profile"]',
-                'a:contains("Settings")',
-                'a:contains("Account")',
-                'a:contains("Profile")'
-            ]
-            
-            for selector in settings_links:
-                try:
-                    link = driver.find_element(By.CSS_SELECTOR, selector)
-                    link.click()
-                    await asyncio.sleep(random.uniform(2, 4))
-                    
-                    # Now look for deletion option
-                    for del_selector in deletion_links:
-                        try:
-                            del_link = driver.find_element(By.CSS_SELECTOR, del_selector)
-                            del_link.click()
-                            await asyncio.sleep(random.uniform(2, 4))
-                            return True
-                        except:
-                            continue
-                    
-                except:
-                    continue
-            
-            return False
-            
-        except Exception as e:
-            print(f"Navigation to deletion page failed: {e}")
-            return False
-    
-    async def _execute_final_deletion(self, driver: webdriver.Chrome, analysis: Dict[str, Any], account: Account) -> bool:
-        """Execute the final deletion steps"""
+            except:
+                continue
         
+        return False
+    
+    async def _perform_deletion(self, page: Page, config: Dict) -> Dict[str, Any]:
+        """Navigate to account deletion page and perform deletion"""
         try:
-            # Look for deletion button
-            deletion_buttons = [
-                'button:contains("Delete Account")',
-                'button:contains("Delete My Account")',
-                'button:contains("Close Account")',
-                'button:contains("Deactivate")',
-                'input[value*="Delete"]',
-                '.delete-button',
-                '#delete-account'
-            ]
+            # Navigate to account/settings page
+            if config.get('account_settings_url'):
+                await page.goto(config['account_settings_url'])
+            else:
+                # Try common patterns
+                current_url = page.url
+                base_url = '/'.join(current_url.split('/')[:3])
+                for url_pattern in ['/settings', '/account', '/preferences', '/profile']:
+                    try:
+                        await page.goto(base_url + url_pattern)
+                        await page.wait_for_load_state('networkidle', timeout=5000)
+                        break
+                    except:
+                        continue
             
-            delete_button = None
-            for selector in deletion_buttons:
+            # Look for deletion link/button
+            deletion_texts = config.get('deletion_link_texts', [
+                'Delete Account',
+                'Close Account', 
+                'Remove Account',
+                'Deactivate Account',
+                'Delete My Account',
+                'Close My Account'
+            ])
+            
+            deletion_link_found = False
+            for text in deletion_texts:
                 try:
-                    delete_button = driver.find_element(By.CSS_SELECTOR, selector)
+                    # Try to find and click deletion link
+                    await page.locator(f'text=/{text}/i').first.click(timeout=3000)
+                    deletion_link_found = True
                     break
                 except:
                     continue
             
-            if not delete_button:
-                print("Could not find delete button")
-                return False
+            if not deletion_link_found:
+                # Try with specific selectors if configured
+                if config.get('deletion_link_selector'):
+                    await page.click(config['deletion_link_selector'])
+                else:
+                    return {
+                        'success': False,
+                        'error': 'Could not find account deletion option'
+                    }
             
-            # Click delete button
-            delete_button.click()
-            await asyncio.sleep(random.uniform(2, 4))
+            # Wait for deletion page to load
+            await page.wait_for_load_state('networkidle')
             
-            # Handle confirmation dialog
-            confirmation_handled = await self._handle_confirmation(driver, analysis)
-            if not confirmation_handled:
-                return False
-            
-            # Wait for deletion to complete
-            await asyncio.sleep(random.uniform(3, 5))
-            
-            # Check for success indicators
-            success_indicators = [
-                'account deleted',
-                'account closed',
-                'successfully deleted',
-                'account deactivated',
-                'goodbye'
-            ]
-            
-            page_content = driver.page_source.lower()
-            deletion_success = any(indicator in page_content for indicator in success_indicators)
-            
-            return deletion_success
-            
-        except Exception as e:
-            print(f"Final deletion failed: {e}")
-            return False
-    
-    async def _handle_confirmation(self, driver: webdriver.Chrome, analysis: Dict[str, Any]) -> bool:
-        """Handle confirmation dialogs"""
-        
-        try:
-            # Wait for confirmation dialog
-            await asyncio.sleep(random.uniform(1, 2))
-            
-            # Look for confirmation buttons
-            confirm_buttons = [
-                'button:contains("Yes")',
-                'button:contains("Confirm")',
-                'button:contains("Delete")',
-                'button:contains("Continue")',
-                'button:contains("OK")',
-                '.confirm-button',
-                '#confirm-delete'
-            ]
-            
-            for selector in confirm_buttons:
-                try:
-                    confirm_button = driver.find_element(By.CSS_SELECTOR, selector)
-                    confirm_button.click()
-                    await asyncio.sleep(random.uniform(1, 2))
-                    break
-                except:
-                    continue
-            
-            # Handle password confirmation if required
-            password_fields = driver.find_elements(By.CSS_SELECTOR, 'input[type="password"]')
-            if password_fields:
-                password_field = password_fields[0]
-                password = "dummy_password"  # This would be decrypted
-                password_field.send_keys(password)
+            # Handle confirmation steps
+            confirmation_steps = config.get('confirmation_steps', [])
+            for step in confirmation_steps:
+                if step['type'] == 'click':
+                    await page.click(step['selector'])
+                elif step['type'] == 'fill':
+                    await page.fill(step['selector'], step['value'])
+                elif step['type'] == 'check':
+                    await page.check(step['selector'])
+                elif step['type'] == 'select':
+                    await page.select_option(step['selector'], step['value'])
                 
-                # Find submit button
-                submit_button = driver.find_element(By.CSS_SELECTOR, 'button[type="submit"]')
-                submit_button.click()
-                await asyncio.sleep(random.uniform(2, 3))
+                # Wait between steps
+                await asyncio.sleep(1)
             
-            return True
+            # Final confirmation
+            confirm_texts = config.get('confirm_button_texts', [
+                'Delete Account',
+                'Confirm Deletion',
+                'Yes, Delete',
+                'Delete',
+                'Confirm',
+                'Delete My Account'
+            ])
             
-        except Exception as e:
-            print(f"Confirmation handling failed: {e}")
-            return False
-    
-    def _get_driver(self) -> webdriver.Chrome:
-        """Get configured Chrome driver"""
-        
-        chrome_options = Options()
-        chrome_options.add_argument('--headless')
-        chrome_options.add_argument('--no-sandbox')
-        chrome_options.add_argument('--disable-dev-shm-usage')
-        chrome_options.add_argument('--disable-gpu')
-        chrome_options.add_argument('--window-size=1920,1080')
-        chrome_options.add_argument('--disable-blink-features=AutomationControlled')
-        
-        # Random user agent
-        user_agents = [
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        ]
-        
-        chrome_options.add_argument(f'--user-agent={random.choice(user_agents)}')
-        
-        # Set binary location if specified
-        if settings.chrome_bin:
-            chrome_options.binary_location = settings.chrome_bin
-        
-        # Create driver
-        driver = webdriver.Chrome(
-            executable_path=settings.chromedriver_path,
-            options=chrome_options
-        )
-        
-        # Set timeouts
-        driver.set_page_load_timeout(30)
-        driver.implicitly_wait(10)
-        
-        return driver
-    
-    async def test_site_accessibility(self, url: str) -> Dict[str, Any]:
-        """Test if a site is accessible and analyze its structure"""
-        
-        try:
-            driver = self._get_driver()
-            start_time = time.time()
+            for text in confirm_texts:
+                try:
+                    await page.locator(f'button:has-text("{text}")').first.click(timeout=3000)
+                    break
+                except:
+                    continue
             
-            driver.get(url)
-            load_time = time.time() - start_time
+            # Wait for confirmation
+            await page.wait_for_load_state('networkidle')
             
-            # Basic analysis
-            title = driver.title
-            has_login = bool(driver.find_elements(By.CSS_SELECTOR, 'input[type="password"]'))
-            has_captcha = bool(driver.find_elements(By.CSS_SELECTOR, '.captcha, .recaptcha'))
+            # Check for success message
+            success_indicators = config.get('success_indicators', [
+                'text=/account.*deleted/i',
+                'text=/successfully.*removed/i',
+                'text=/account.*closed/i',
+                'text=/goodbye/i'
+            ])
             
-            # Check for common frameworks
-            page_source = driver.page_source
-            frameworks = []
-            if 'react' in page_source.lower():
-                frameworks.append('React')
-            if 'angular' in page_source.lower():
-                frameworks.append('Angular')
-            if 'vue' in page_source.lower():
-                frameworks.append('Vue')
+            for indicator in success_indicators:
+                try:
+                    element = await page.wait_for_selector(indicator, timeout=5000)
+                    confirmation_text = await element.text_content()
+                    return {
+                        'success': True,
+                        'confirmation_text': confirmation_text
+                    }
+                except:
+                    continue
             
-            driver.quit()
+            # If no clear success indicator, assume success if we're logged out
+            try:
+                # Check if we're redirected to homepage or login
+                if 'login' in page.url.lower() or page.url == config.get('homepage_url', ''):
+                    return {
+                        'success': True,
+                        'confirmation_text': 'Account appears to be deleted (redirected to login/homepage)'
+                    }
+            except:
+                pass
             
             return {
-                'accessible': True,
-                'load_time': load_time,
-                'title': title,
-                'has_login': has_login,
-                'has_captcha': has_captcha,
-                'frameworks': frameworks,
-                'automation_difficulty': 3 + (2 if has_captcha else 0)
+                'success': False,
+                'error': 'Could not confirm account deletion'
             }
             
         except Exception as e:
             return {
-                'accessible': False,
-                'error': str(e),
-                'automation_difficulty': 10
+                'success': False,
+                'error': f'Deletion process failed: {str(e)}'
             }
+    
+    async def _take_screenshot(self, page: Page, account_id: int, stage: str) -> str:
+        """Take a screenshot and return the file path"""
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"account_{account_id}_{stage}_{timestamp}.png"
+        filepath = self.screenshots_dir / filename
+        
+        await page.screenshot(path=str(filepath), full_page=True)
+        
+        return str(filepath)
+    
+    def _get_site_config(self, site_url: str) -> Optional[Dict]:
+        """Get site-specific configuration for deletion"""
+        # Extract domain from URL
+        from urllib.parse import urlparse
+        domain = urlparse(site_url).netloc.lower()
+        
+        # Remove www. prefix
+        if domain.startswith('www.'):
+            domain = domain[4:]
+        
+        # Look for exact match or partial match
+        for pattern, config in SITE_CONFIGS.items():
+            if pattern in domain or domain in pattern:
+                return config
+        
+        return None
+    
+    async def test_deletion_capability(self, site_url: str) -> Dict[str, Any]:
+        """Test if we can automate deletion for a given site"""
+        config = self._get_site_config(site_url)
+        
+        if not config:
+            return {
+                'supported': False,
+                'reason': 'No configuration available for this site',
+                'difficulty': 10
+            }
+        
+        return {
+            'supported': True,
+            'difficulty': config.get('difficulty', 5),
+            'method': 'automated',
+            'requires_2fa': config.get('requires_2fa', False),
+            'estimated_time': config.get('estimated_time', '2-5 minutes')
+        }

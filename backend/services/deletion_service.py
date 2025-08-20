@@ -6,7 +6,7 @@ import time
 import random
 
 from models import DeletionTask, Account, TaskStatus, DeletionMethod
-from services.web_scraper import WebScraper
+# from services.web_scraper import WebScraper  # Temporarily disabled - playwright not installed
 from services.email_service import EmailService
 from services.llm_service import LLMService
 from services.audit_service import AuditService
@@ -17,7 +17,7 @@ class DeletionService:
     """Service for managing account deletion processes"""
     
     def __init__(self):
-        self.web_scraper = WebScraper()
+        # self.web_scraper = WebScraper()  # Temporarily disabled - playwright not installed
         self.email_service = EmailService()
         self.llm_service = LLMService()
         self.audit_service = AuditService()
@@ -66,41 +66,37 @@ class DeletionService:
         account = task.account
         
         try:
-            # Step 1: Use LLM to get site information
-            site_info = await self.llm_service.discover_accounts([{
-                'site_name': account.site_name,
-                'site_url': account.site_url,
-                'username': account.username
-            }])
+            # Temporarily disabled - playwright not installed
+            return False
             
-            if not site_info or not site_info[0].get('deletion_url'):
-                return False
+            # # First check if we support this site
+            # capability = await self.web_scraper.test_deletion_capability(account.site_url)
+            # 
+            # if not capability['supported']:
+            #     print(f"Site {account.site_name} not supported for automation: {capability['reason']}")
+            #     return False
+            # 
+            # # If difficulty is too high or requires 2FA, skip automation
+            # if capability['difficulty'] > 8 or capability.get('requires_2fa'):
+            #     print(f"Site {account.site_name} too difficult or requires 2FA")
+            #     return False
+            # 
+            # # Attempt automated deletion
+            # result = await self.web_scraper.delete_account(account, task)
             
-            # Step 2: Navigate to deletion page
-            deletion_url = site_info[0]['deletion_url']
-            page_content = await self.web_scraper.navigate_to_page(deletion_url)
-            
-            if not page_content:
-                return False
-            
-            # Step 3: Analyze page with LLM
-            analysis = await self.llm_service.analyze_deletion_page(
-                page_content, account.site_name
-            )
-            
-            if analysis.get('difficulty', 10) > 8:
-                return False  # Too difficult for automation
-            
-            # Step 4: Attempt automated deletion
-            success = await self.web_scraper.execute_deletion(
-                account, analysis, task.id
-            )
-            
-            if success:
-                await self._mark_task_completed(task)
-                return True
-            else:
-                return False
+            # if result['success']:
+            #     await self._mark_task_completed(task, result.get('confirmation'))
+            #     
+            #     # Store screenshots for proof
+            #     if result.get('screenshots'):
+            #         task.deletion_proof = {
+            #             'screenshots': result['screenshots'],
+            #             'confirmation': result.get('confirmation'),
+            #             'timestamp': datetime.now().isoformat()
+            #         }
+            #     return True
+            # else:
+            #     return False
             
         except Exception as e:
             print(f"Automated deletion failed for {account.site_name}: {e}")

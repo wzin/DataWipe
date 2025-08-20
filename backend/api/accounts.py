@@ -5,8 +5,9 @@ from pydantic import BaseModel, ConfigDict
 from datetime import datetime
 
 from database import get_db
-from models import Account, AccountStatus
+from models import Account, AccountStatus, User
 from services.audit_service import AuditService
+from api.auth import get_current_active_user
 
 router = APIRouter()
 
@@ -39,11 +40,12 @@ async def get_accounts(
     limit: int = Query(100, ge=1, le=1000),
     status: Optional[AccountStatus] = None,
     search: Optional[str] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """Get list of accounts with optional filtering"""
     
-    query = db.query(Account)
+    query = db.query(Account).filter(Account.user_id == current_user.id)
     
     # Apply filters
     if status:
@@ -103,7 +105,10 @@ async def update_account(
 ):
     """Update account information"""
     
-    account = db.query(Account).filter(Account.id == account_id).first()
+    account = db.query(Account).filter(
+        Account.id == account_id,
+        Account.user_id == current_user.id
+    ).first()
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
     
@@ -134,7 +139,10 @@ async def update_account(
 async def delete_account(account_id: int, db: Session = Depends(get_db)):
     """Remove account from system (not from the actual service)"""
     
-    account = db.query(Account).filter(Account.id == account_id).first()
+    account = db.query(Account).filter(
+        Account.id == account_id,
+        Account.user_id == current_user.id
+    ).first()
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
     

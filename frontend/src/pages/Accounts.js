@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
+import { useNavigate } from 'react-router-dom';
 import { 
   Search, 
   Filter, 
@@ -9,12 +10,15 @@ import {
   Trash2,
   Mail,
   Eye,
-  EyeOff
+  EyeOff,
+  PlusCircle,
+  Upload
 } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { getAccounts, bulkSelectAccounts, deleteAccount } from '../services/api';
 
 const Accounts = () => {
+  const navigate = useNavigate();
   const [selectedAccounts, setSelectedAccounts] = useState(new Set());
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -146,7 +150,23 @@ const Accounts = () => {
             Manage your discovered accounts and select them for deletion
           </p>
         </div>
-        
+        <div className="flex gap-3">
+          <button
+            onClick={() => navigate('/upload')}
+            className="flex items-center px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            <Upload className="w-4 h-4 mr-2" />
+            Import CSV
+          </button>
+          <button
+            onClick={() => navigate('/accounts/manual')}
+            className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            <PlusCircle className="w-4 h-4 mr-2" />
+            Add Manually
+          </button>
+        </div>
+      </div>
         {selectedAccounts.size > 0 && (
           <div className="flex space-x-2">
             <button

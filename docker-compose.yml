@@ -15,10 +15,12 @@ services:
       - SECRET_KEY=${SECRET_KEY:-test-secret-key-change-in-production}
       - ENVIRONMENT=development
     volumes:
+      - ./backend:/app
       - ./data:/app/data
       - ./uploads:/app/uploads
       - ./logs:/app/logs
     restart: unless-stopped
+    command: ["/bin/bash", "/app/startup.sh"]
 
   frontend:
     build:

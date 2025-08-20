@@ -12,7 +12,7 @@ from services.csv_parser import CSVParser
 from services.llm_service import LLMService
 from services.deletion_service import DeletionService
 from services.email_service import EmailService
-from api import accounts, deletion, audit, upload, settings
+from api import accounts, deletion, audit, upload, settings, auth, accounts_manual
 from config import settings as app_settings
 
 
@@ -54,8 +54,10 @@ app.add_middleware(
 security = HTTPBearer(auto_error=False)
 
 # API Routes
+app.include_router(auth.router, prefix="/api", tags=["auth"])  # Auth routes don't require authentication
 app.include_router(upload.router, prefix="/api", tags=["upload"])
 app.include_router(accounts.router, prefix="/api", tags=["accounts"])
+app.include_router(accounts_manual.router, prefix="/api", tags=["manual_accounts"])
 app.include_router(deletion.router, prefix="/api", tags=["deletion"])
 app.include_router(audit.router, prefix="/api", tags=["audit"])
 app.include_router(settings.router, prefix="/api", tags=["settings"])

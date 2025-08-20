@@ -15,5 +15,9 @@ httpx
 pandas
 openai
 anthropic
-selenium
+playwright
+beautifulsoup4
 email-validator
+python-jose[cryptography]
+passlib[bcrypt]
+python-dateutil
