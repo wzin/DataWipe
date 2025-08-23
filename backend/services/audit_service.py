@@ -20,16 +20,18 @@ class AuditService:
         key = base64.urlsafe_b64encode(settings.secret_key.encode()[:32].ljust(32, b'0'))
         return Fernet(key)
     
-    async def log_action(self, db: Session, account_id: Optional[int], action: str, 
-                        details: Dict[str, Any], masked_credentials: bool = True,
+    async def log_action(self, db: Session, user_id: Optional[int] = None, 
+                        account_id: Optional[int] = None, action: str = None, 
+                        details: Dict[str, Any] = None, masked_credentials: bool = True,
                         user_agent: str = None, ip_address: str = None):
         """Log an audit action"""
         
         # Mask sensitive information in details
-        if masked_credentials:
+        if masked_credentials and details:
             details = self._mask_sensitive_data(details)
         
         log_entry = AuditLog(
+            user_id=user_id,
             account_id=account_id,
             action=action,
             details=details,
