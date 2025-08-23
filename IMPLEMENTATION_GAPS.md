@@ -286,12 +286,12 @@ This document identifies gaps between the user stories defined in USER_STORIES.m
 5. ✅ Add CSV format auto-detection - COMPLETED
 
 ### Phase 2: Essential Features (P1)
-1. Add manual account entry
-2. Implement account categorization
-3. Add email monitoring
-4. Implement review/confirm workflow
+1. ✅ Add manual account entry - COMPLETED
+2. ✅ Implement account categorization - COMPLETED
+3. ✅ Add email monitoring - COMPLETED (IMAP service)
+4. ⏳ Implement review/confirm workflow - IN PROGRESS
 5. Add compliance report generation
-6. Implement retry logic
+6. Add retry logic for failed deletions
 
 ### Phase 3: Enhancement Features (P2)
 1. Add risk assessment
