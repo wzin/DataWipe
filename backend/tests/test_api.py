@@ -10,7 +10,7 @@ from models import Account, UserSettings, DeletionTask
 class TestUploadAPI:
     """Test upload API endpoints"""
     
-    def test_upload_csv_success(self, client, mock_llm_response):
+    def test_upload_csv_success(self, client, auth_headers, mock_llm_response):
         """Test successful CSV upload"""
         csv_content = """name,url,username,password,notes
 Gmail,https://accounts.google.com,test@gmail.com,password123,Email account"""
@@ -22,27 +22,27 @@ Gmail,https://accounts.google.com,test@gmail.com,password123,Email account"""
         with patch('services.llm_service.LLMService.discover_accounts') as mock_discover:
             mock_discover.return_value = [mock_llm_response]
             
-            response = client.post("/api/upload", files=files)
+            response = client.post("/api/upload", files=files, headers=auth_headers)
             
             assert response.status_code == 200
             data = response.json()
             assert "accounts_discovered" in data
             assert data["accounts_discovered"] == 1
     
-    def test_upload_invalid_file_type(self, client):
+    def test_upload_invalid_file_type(self, client, auth_headers):
         """Test upload with invalid file type"""
         files = {
             'file': ('test.txt', io.StringIO('invalid content'), 'text/plain')
         }
         
-        response = client.post("/api/upload", files=files)
+        response = client.post("/api/upload", files=files, headers=auth_headers)
         
         assert response.status_code == 400
         assert "Only CSV files are supported" in response.json()["detail"]
     
-    def test_get_supported_formats(self, client):
+    def test_get_supported_formats(self, client, auth_headers):
         """Test get supported formats endpoint"""
-        response = client.get("/api/upload/formats")
+        response = client.get("/api/upload/formats", headers=auth_headers)
         
         assert response.status_code == 200
         data = response.json()
@@ -54,16 +54,16 @@ Gmail,https://accounts.google.com,test@gmail.com,password123,Email account"""
 class TestAccountsAPI:
     """Test accounts API endpoints"""
     
-    def test_get_accounts_empty(self, client):
+    def test_get_accounts_empty(self, client, auth_headers):
         """Test getting accounts when none exist"""
-        response = client.get("/api/accounts")
+        response = client.get("/api/accounts", headers=auth_headers)
         
         assert response.status_code == 200
         assert response.json() == []
     
-    def test_get_accounts_with_data(self, client, sample_account):
+    def test_get_accounts_with_data(self, client, auth_headers, sample_account):
         """Test getting accounts with existing data"""
-        response = client.get("/api/accounts")
+        response = client.get("/api/accounts", headers=auth_headers)
         
         assert response.status_code == 200
         data = response.json()
@@ -71,59 +71,61 @@ class TestAccountsAPI:
         assert data[0]["site_name"] == "Test Site"
         assert data[0]["username"] == "testuser"
     
-    def test_get_account_by_id(self, client, sample_account):
+    def test_get_account_by_id(self, client, auth_headers, sample_account):
         """Test getting specific account by ID"""
-        response = client.get(f"/api/accounts/{sample_account.id}")
+        response = client.get(f"/api/accounts/{sample_account.id}", headers=auth_headers)
         
         assert response.status_code == 200
         data = response.json()
         assert data["site_name"] == "Test Site"
         assert data["username"] == "testuser"
     
-    def test_get_account_not_found(self, client):
+    def test_get_account_not_found(self, client, auth_headers):
         """Test getting non-existent account"""
-        response = client.get("/api/accounts/999")
+        response = client.get("/api/accounts/999", headers=auth_headers)
         
         assert response.status_code == 404
         assert "Account not found" in response.json()["detail"]
     
-    def test_update_account_status(self, client, sample_account):
+    def test_update_account_status(self, client, auth_headers, sample_account):
         """Test updating account status"""
         response = client.put(
             f"/api/accounts/{sample_account.id}",
-            json={"status": "pending"}
+            json={"status": "pending"},
+            headers=auth_headers
         )
         
         assert response.status_code == 200
         
         # Verify status was updated
-        response = client.get(f"/api/accounts/{sample_account.id}")
+        response = client.get(f"/api/accounts/{sample_account.id}", headers=auth_headers)
         assert response.json()["status"] == "pending"
     
-    def test_bulk_select_accounts(self, client, sample_account):
+    def test_bulk_select_accounts(self, client, auth_headers, sample_account):
         """Test bulk selecting accounts"""
         response = client.post(
             "/api/accounts/bulk-select",
-            json={"account_ids": [sample_account.id], "action": "select"}
+            json={"account_ids": [sample_account.id], "action": "select"},
+            headers=auth_headers
         )
         
         assert response.status_code == 200
         data = response.json()
         assert "Successfully selected" in data["message"]
     
-    def test_delete_account(self, client, sample_account):
+    def test_delete_account(self, client, auth_headers, sample_account):
         """Test deleting account"""
-        response = client.delete(f"/api/accounts/{sample_account.id}")
+        response = client.delete(f"/api/accounts/{sample_account.id}", headers=auth_headers)
         
         assert response.status_code == 200
         
         # Verify account was deleted
-        response = client.get(f"/api/accounts/{sample_account.id}")
+        response = client.get(f"/api/accounts/{sample_account.id}", headers=auth_headers)
         assert response.status_code == 404
     
-    def test_get_accounts_summary(self, client, sample_account):
+    def test_get_accounts_summary(self, client, auth_headers, sample_account):
         """Test getting accounts summary"""
-        response = client.get("/api/accounts/summary")
+        response = client.get("/api/accounts/summary", headers=auth_headers)
         
         assert response.status_code == 200
         data = response.json()
@@ -135,15 +137,15 @@ class TestAccountsAPI:
 class TestSettingsAPI:
     """Test settings API endpoints"""
     
-    def test_get_email_settings_not_configured(self, client):
+    def test_get_email_settings_not_configured(self, client, auth_headers):
         """Test getting email settings when not configured"""
-        response = client.get("/api/settings/email")
+        response = client.get("/api/settings/email", headers=auth_headers)
         
         assert response.status_code == 404
         assert "Email settings not configured" in response.json()["detail"]
     
     @patch('services.email_service.EmailService.test_email_configuration')
-    def test_configure_email_success(self, mock_test, client):
+    def test_configure_email_success(self, mock_test, client, auth_headers):
         """Test successful email configuration"""
         mock_test.return_value = {
             'success': True,
@@ -157,7 +159,8 @@ class TestSettingsAPI:
                 "email": "test@gmail.com",
                 "password": "app_password",
                 "name": "Test User"
-            }
+            },
+            headers=auth_headers
         )
         
         assert response.status_code == 200
@@ -166,7 +169,7 @@ class TestSettingsAPI:
         assert data["provider"] == "gmail.com"
     
     @patch('services.email_service.EmailService.test_email_configuration')
-    def test_configure_email_invalid(self, mock_test, client):
+    def test_configure_email_invalid(self, mock_test, client, auth_headers):
         """Test email configuration with invalid credentials"""
         mock_test.return_value = {
             'success': False,
@@ -178,15 +181,16 @@ class TestSettingsAPI:
             json={
                 "email": "test@gmail.com",
                 "password": "wrong_password"
-            }
+            },
+            headers=auth_headers
         )
         
         assert response.status_code == 400
         assert "Email configuration failed" in response.json()["detail"]
     
-    def test_get_supported_email_providers(self, client):
+    def test_get_supported_email_providers(self, client, auth_headers):
         """Test getting supported email providers"""
-        response = client.get("/api/settings/email/providers")
+        response = client.get("/api/settings/email/providers", headers=auth_headers)
         
         assert response.status_code == 200
         data = response.json()
@@ -201,24 +205,26 @@ class TestSettingsAPI:
 class TestDeletionAPI:
     """Test deletion API endpoints"""
     
-    def test_start_deletion_no_accounts(self, client):
+    def test_start_deletion_no_accounts(self, client, auth_headers):
         """Test starting deletion with no accounts"""
         response = client.post(
             "/api/deletion/start",
-            json={"account_ids": [999]}
+            json={"account_ids": [999]},
+            headers=auth_headers
         )
         
         assert response.status_code == 400
         assert "Some account IDs are invalid" in response.json()["detail"]
     
     @patch('services.deletion_service.DeletionService.process_tasks')
-    def test_start_deletion_success(self, mock_process, client, sample_account):
+    def test_start_deletion_success(self, mock_process, client, auth_headers, sample_account):
         """Test successful deletion start"""
         mock_process.return_value = True
         
         response = client.post(
             "/api/deletion/start",
-            json={"account_ids": [sample_account.id]}
+            json={"account_ids": [sample_account.id]},
+            headers=auth_headers
         )
         
         assert response.status_code == 200
@@ -226,9 +232,9 @@ class TestDeletionAPI:
         assert "Started deletion process" in data["message"]
         assert len(data["task_ids"]) == 1
     
-    def test_get_deletion_tasks(self, client):
+    def test_get_deletion_tasks(self, client, auth_headers):
         """Test getting deletion tasks"""
-        response = client.get("/api/deletion/tasks")
+        response = client.get("/api/deletion/tasks", headers=auth_headers)
         
         assert response.status_code == 200
         assert isinstance(response.json(), list)
@@ -237,25 +243,25 @@ class TestDeletionAPI:
 class TestAuditAPI:
     """Test audit API endpoints"""
     
-    def test_get_audit_logs(self, client):
+    def test_get_audit_logs(self, client, auth_headers):
         """Test getting audit logs"""
-        response = client.get("/api/audit")
+        response = client.get("/api/audit", headers=auth_headers)
         
         assert response.status_code == 200
         assert isinstance(response.json(), list)
     
-    def test_get_audit_actions(self, client):
+    def test_get_audit_actions(self, client, auth_headers):
         """Test getting audit actions"""
-        response = client.get("/api/audit/actions")
+        response = client.get("/api/audit/actions", headers=auth_headers)
         
         assert response.status_code == 200
         data = response.json()
         assert "actions" in data
         assert isinstance(data["actions"], list)
     
-    def test_get_audit_summary(self, client):
+    def test_get_audit_summary(self, client, auth_headers):
         """Test getting audit summary"""
-        response = client.get("/api/audit/summary")
+        response = client.get("/api/audit/summary", headers=auth_headers)
         
         assert response.status_code == 200
         data = response.json()
@@ -276,9 +282,9 @@ class TestHealthAPI:
         assert data["status"] == "healthy"
         assert "version" in data
     
-    def test_get_stats(self, client):
+    def test_get_stats(self, client, auth_headers):
         """Test getting system stats"""
-        response = client.get("/api/stats")
+        response = client.get("/api/stats", headers=auth_headers)
         
         assert response.status_code == 200
         data = response.json()

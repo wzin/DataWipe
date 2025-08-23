@@ -63,12 +63,15 @@ def test_user(test_db):
 
 
 @pytest.fixture
-def auth_headers(test_user):
+def auth_headers(client, test_user):
     """Get authentication headers for test user"""
     from services.auth_service import AuthService
     
     auth_service = AuthService()
-    access_token = auth_service.create_access_token(data={"sub": test_user.username})
+    access_token = auth_service.create_access_token(data={
+        "sub": test_user.id,
+        "username": test_user.username
+    })
     return {"Authorization": f"Bearer {access_token}"}
 
 
@@ -93,3 +96,38 @@ def test_account(test_db, test_user):
     test_db.commit()
     test_db.refresh(account)
     return account
+
+
+@pytest.fixture
+def sample_account(test_db, test_user):
+    """Alias for test_account for backward compatibility"""
+    from models import Account, AccountStatus
+    from services.encryption_service import encryption_service
+    
+    account = Account(
+        user_id=test_user.id,
+        site_name="Test Site",
+        site_url="https://test.com",
+        username="testuser",
+        encrypted_password=encryption_service.encrypt_password("password123"),
+        email="test@test.com",
+        status=AccountStatus.DISCOVERED,
+        category="other",
+        risk_level="medium"
+    )
+    test_db.add(account)
+    test_db.commit()
+    test_db.refresh(account)
+    return account
+
+
+@pytest.fixture
+def mock_llm_response():
+    """Mock LLM response for testing"""
+    return {
+        "site_name": "Test Site",
+        "site_url": "https://test.com",
+        "username": "testuser",
+        "password": "password123",
+        "email": "test@test.com"
+    }
