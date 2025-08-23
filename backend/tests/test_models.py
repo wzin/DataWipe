@@ -4,7 +4,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from models import (
-    Base, Account, DeletionTask, AuditLog, LLMInteraction, 
+    Base, User, Account, DeletionTask, AuditLog, LLMInteraction, 
     SiteMetadata, UserSettings, AccountStatus, DeletionMethod, 
     TaskStatus, LLMProvider, LLMTaskType
 )
@@ -24,10 +24,11 @@ class TestModels:
     def test_account_model(self, session):
         """Test Account model"""
         account = Account(
+            user_id=1,
             site_name="Test Site",
             site_url="https://test.com",
             username="testuser",
-            password_hash="encrypted_password",
+            encrypted_password="encrypted_password",
             email="test@example.com",
             status=AccountStatus.DISCOVERED
         )
@@ -48,10 +49,11 @@ class TestModels:
         """Test DeletionTask model"""
         # Create account first
         account = Account(
+            user_id=1,
             site_name="Test Site",
             site_url="https://test.com",
             username="testuser",
-            password_hash="encrypted_password",
+            encrypted_password="encrypted_password",
             status=AccountStatus.DISCOVERED
         )
         session.add(account)
@@ -84,10 +86,11 @@ class TestModels:
         """Test AuditLog model"""
         # Create account first
         account = Account(
+            user_id=1,
             site_name="Test Site",
             site_url="https://test.com",
             username="testuser",
-            password_hash="encrypted_password",
+            encrypted_password="encrypted_password",
             status=AccountStatus.DISCOVERED
         )
         session.add(account)
@@ -95,6 +98,7 @@ class TestModels:
         
         # Create audit log
         log = AuditLog(
+            user_id=1,
             account_id=account.id,
             action="test_action",
             details={"test": "data"},
@@ -123,10 +127,11 @@ class TestModels:
         """Test LLMInteraction model"""
         # Create account first
         account = Account(
+            user_id=1,
             site_name="Test Site",
             site_url="https://test.com",
             username="testuser",
-            password_hash="encrypted_password",
+            encrypted_password="encrypted_password",
             status=AccountStatus.DISCOVERED
         )
         session.add(account)
@@ -154,7 +159,7 @@ class TestModels:
         assert retrieved.prompt == "Test prompt"
         assert retrieved.response == "Test response"
         assert retrieved.tokens_used == 100
-        assert retrieved.cost == 0.002
+        assert float(retrieved.cost) == 0.002
         assert retrieved.created_at is not None
         
         # Test relationship
@@ -186,7 +191,7 @@ class TestModels:
         assert retrieved.privacy_email == "privacy@test.com"
         assert retrieved.deletion_instructions == "Go to settings and delete"
         assert retrieved.automation_difficulty == 5
-        assert retrieved.success_rate == 0.85
+        assert float(retrieved.success_rate) == 0.85
         assert retrieved.login_selectors == {"username": "#username", "password": "#password"}
         assert retrieved.deletion_selectors == {"delete_button": "#delete-account"}
         assert retrieved.confirmation_texts == ["Are you sure?", "This will delete your account"]
@@ -254,10 +259,11 @@ class TestModels:
         """Test model relationships"""
         # Create account
         account = Account(
+            user_id=1,
             site_name="Test Site",
             site_url="https://test.com",
             username="testuser",
-            password_hash="encrypted_password",
+            encrypted_password="encrypted_password",
             status=AccountStatus.DISCOVERED
         )
         session.add(account)

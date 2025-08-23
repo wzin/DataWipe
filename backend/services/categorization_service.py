@@ -67,7 +67,7 @@ class CategorizationService:
                 'slack.com', 'zoom.us', 'teams.microsoft.com', 'asana.com',
                 'trello.com', 'notion.so', 'evernote.com', 'todoist.com',
                 'dropbox.com', 'box.com', 'drive.google.com', 'onedrive.com',
-                'github.com', 'gitlab.com', 'bitbucket.org', 'jira.atlassian.com'
+                'jira.atlassian.com'
             ],
             'risk_level': 'medium',
             'data_sensitivity': 'high'
@@ -248,13 +248,31 @@ class CategorizationService:
     def _extract_domain(self, url: str) -> str:
         """Extract domain from URL"""
         try:
+            if not url:
+                return ''
+            
+            # Handle invalid URLs that don't look like domains
+            if not '.' in url and not url.startswith(('http://', 'https://')):
+                return ''
+            
             if not url.startswith(('http://', 'https://')):
                 url = f'https://{url}'
+            
             parsed = urlparse(url)
             domain = parsed.netloc.lower()
+            
+            if not domain:
+                # If no netloc, try to extract from path
+                domain = url.replace('https://', '').replace('http://', '').split('/')[0]
+            
             # Remove www prefix
             if domain.startswith('www.'):
                 domain = domain[4:]
+            
+            # Final validation - must have a dot for a valid domain
+            if '.' not in domain:
+                return ''
+            
             return domain
         except:
             return ''

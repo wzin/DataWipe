@@ -211,3 +211,5 @@ When implementing features, ask about:
   - SMTP/IMAP email integration
   - CSV auto-detection for 10+ password managers
 - Next: Phase 2 (P1 features) - Manual entry, categorization, etc.
+
+- ALways run the tests inside the docker - never on the host

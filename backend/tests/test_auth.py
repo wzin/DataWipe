@@ -41,7 +41,8 @@ def test_db():
 def test_user(test_db):
     """Create a test user"""
     db = TestingSessionLocal()
-    user = AuthService.create_user(
+    auth_service = AuthService()
+    user = auth_service.create_user(
         db=db,
         username="testuser",
         email="test@example.com",

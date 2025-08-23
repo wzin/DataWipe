@@ -144,9 +144,11 @@ class CSVParser:
         # If no good match, try generic detection
         if best_score < 0.5:
             if self._has_basic_columns(columns_lower):
-                best_match = 'generic'
-                best_score = 0.5
+                return 'generic', 0.5
+            # No match at all
+            return None, 0.0
         
+        # Return the best match if score is good
         return best_match, best_score
     
     def _has_basic_columns(self, columns: List[str]) -> bool:
@@ -260,8 +262,9 @@ class CSVParser:
         password_col = next((col for col in columns_lower if 'password' in col or 'pass' in col or 'pwd' in col), None)
         username_col = next((col for col in columns_lower if 'username' in col or 'user' in col or 'login' in col or 'email' in col), None)
         url_col = next((col for col in columns_lower if 'url' in col or 'website' in col or 'site' in col or 'domain' in col), None)
-        name_col = next((col for col in columns_lower if 'name' in col or 'title' in col or 'description' in col), None)
-        notes_col = next((col for col in columns_lower if 'note' in col or 'comment' in col or 'description' in col), None)
+        # For name column, avoid matching username columns
+        name_col = next((col for col in columns_lower if col in ['name', 'title', 'description', 'site_name', 'service']), None)
+        notes_col = next((col for col in columns_lower if 'note' in col or 'comment' in col), None)
         
         if not password_col:
             raise ValueError("Could not identify password column")
