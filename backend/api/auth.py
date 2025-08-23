@@ -21,7 +21,8 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
 async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
     """Dependency to get the current authenticated user"""
-    return AuthService.get_current_user(db, token)
+    auth_service = AuthService()
+    return auth_service.get_current_user(db, token)
 
 
 async def get_current_active_user(current_user: User = Depends(get_current_user)) -> User:
@@ -40,7 +41,8 @@ async def register(
     """Register a new user"""
     try:
         # Create user
-        user = AuthService.create_user(
+        auth_service = AuthService()
+        user = auth_service.create_user(
             db=db,
             username=user_data.username,
             email=user_data.email,

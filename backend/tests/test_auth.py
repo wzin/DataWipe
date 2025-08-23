@@ -10,38 +10,51 @@ from database import Base, get_db
 from models import User
 from services.auth_service import AuthService
 
-# Test database setup
-SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"
-engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-Base.metadata.create_all(bind=engine)
-
-
-def override_get_db():
-    try:
-        db = TestingSessionLocal()
-        yield db
-    finally:
-        db.close()
-
-
-app.dependency_overrides[get_db] = override_get_db
-client = TestClient(app)
+# Test database setup - use in-memory database for isolation
+@pytest.fixture
+def test_db():
+    """Create a fresh test database for each test"""
+    SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
+    engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    
+    Base.metadata.create_all(bind=engine)
+    
+    def override_get_db():
+        try:
+            db = TestingSessionLocal()
+            yield db
+        finally:
+            db.close()
+    
+    app.dependency_overrides[get_db] = override_get_db
+    
+    yield TestingSessionLocal
+    
+    app.dependency_overrides.clear()
+    Base.metadata.drop_all(bind=engine)
 
 
 @pytest.fixture
-def test_db():
-    Base.metadata.create_all(bind=engine)
-    yield
-    Base.metadata.drop_all(bind=engine)
+def client(test_db):
+    """Create test client with fresh database"""
+    return TestClient(app)
 
 
 @pytest.fixture
 def test_user(test_db):
     """Create a test user"""
-    db = TestingSessionLocal()
+    db = test_db()
     auth_service = AuthService()
+    
+    # First check if user exists and delete if needed
+    existing = db.query(User).filter(
+        (User.username == "testuser") | (User.email == "test@example.com")
+    ).first()
+    if existing:
+        db.delete(existing)
+        db.commit()
+    
     user = auth_service.create_user(
         db=db,
         username="testuser",
@@ -49,23 +62,26 @@ def test_user(test_db):
         password="Test123!@#",
         session_duration_hours=24
     )
+    db.commit()
+    db.refresh(user)
     db.close()
     return user
 
 
 @pytest.fixture
-def auth_headers(test_user):
+def auth_headers(client, test_user):
     """Get auth headers for test user"""
     response = client.post(
         "/api/auth/login",
         data={"username": "testuser", "password": "Test123!@#"}
     )
+    assert response.status_code == 200, f"Login failed: {response.text}"
     token = response.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}
 
 
 class TestUserRegistration:
-    def test_register_valid_user(self, test_db):
+    def test_register_valid_user(self, client, test_db):
         """Test successful user registration"""
         response = client.post(
             "/api/auth/register",
@@ -83,7 +99,7 @@ class TestUserRegistration:
         assert data["user"]["email"] == "newuser@example.com"
         assert data["user"]["session_duration_hours"] == 12
     
-    def test_register_duplicate_username(self, test_user):
+    def test_register_duplicate_username(self, client, test_user):
         """Test registration with duplicate username"""
         response = client.post(
             "/api/auth/register",
@@ -97,7 +113,7 @@ class TestUserRegistration:
         assert response.status_code == 400
         assert "Username already registered" in response.json()["detail"]
     
-    def test_register_duplicate_email(self, test_user):
+    def test_register_duplicate_email(self, client, test_user):
         """Test registration with duplicate email"""
         response = client.post(
             "/api/auth/register",
@@ -111,7 +127,7 @@ class TestUserRegistration:
         assert response.status_code == 400
         assert "Email already registered" in response.json()["detail"]
     
-    def test_register_invalid_password(self, test_db):
+    def test_register_invalid_password(self, client, test_db):
         """Test registration with invalid password"""
         # Too short
         response = client.post(
@@ -149,7 +165,7 @@ class TestUserRegistration:
         )
         assert response.status_code == 422
     
-    def test_register_invalid_email(self, test_db):
+    def test_register_invalid_email(self, client, test_db):
         """Test registration with invalid email"""
         response = client.post(
             "/api/auth/register",
@@ -164,7 +180,7 @@ class TestUserRegistration:
 
 
 class TestUserLogin:
-    def test_login_valid_credentials(self, test_user):
+    def test_login_valid_credentials(self, client, test_user):
         """Test login with valid credentials"""
         response = client.post(
             "/api/auth/login",
@@ -176,7 +192,7 @@ class TestUserLogin:
         assert data["token_type"] == "bearer"
         assert data["user"]["username"] == "testuser"
     
-    def test_login_invalid_username(self, test_user):
+    def test_login_invalid_username(self, client, test_user):
         """Test login with invalid username"""
         response = client.post(
             "/api/auth/login",
@@ -185,7 +201,7 @@ class TestUserLogin:
         assert response.status_code == 401
         assert "Incorrect username or password" in response.json()["detail"]
     
-    def test_login_invalid_password(self, test_user):
+    def test_login_invalid_password(self, client, test_user):
         """Test login with invalid password"""
         response = client.post(
             "/api/auth/login",
@@ -194,7 +210,7 @@ class TestUserLogin:
         assert response.status_code == 401
         assert "Incorrect username or password" in response.json()["detail"]
     
-    def test_account_lockout(self, test_user):
+    def test_account_lockout(self, client, test_user):
         """Test account lockout after multiple failed attempts"""
         # Make 5 failed login attempts
         for _ in range(5):
@@ -214,7 +230,7 @@ class TestUserLogin:
 
 
 class TestAuthenticatedEndpoints:
-    def test_get_current_user(self, auth_headers):
+    def test_get_current_user(self, client, auth_headers):
         """Test getting current user information"""
         response = client.get("/api/auth/me", headers=auth_headers)
         assert response.status_code == 200
@@ -222,24 +238,24 @@ class TestAuthenticatedEndpoints:
         assert data["username"] == "testuser"
         assert data["email"] == "test@example.com"
     
-    def test_get_current_user_no_auth(self, test_db):
+    def test_get_current_user_no_auth(self, client, test_db):
         """Test getting current user without authentication"""
         response = client.get("/api/auth/me")
         assert response.status_code == 401
     
-    def test_get_current_user_invalid_token(self, test_db):
+    def test_get_current_user_invalid_token(self, client, test_db):
         """Test getting current user with invalid token"""
         headers = {"Authorization": "Bearer invalid_token"}
         response = client.get("/api/auth/me", headers=headers)
         assert response.status_code == 401
     
-    def test_logout(self, auth_headers):
+    def test_logout(self, client, auth_headers):
         """Test logout"""
         response = client.post("/api/auth/logout", headers=auth_headers)
         assert response.status_code == 200
         assert response.json()["message"] == "Successfully logged out"
     
-    def test_refresh_token(self, auth_headers):
+    def test_refresh_token(self, client, auth_headers):
         """Test token refresh"""
         response = client.post("/api/auth/refresh", headers=auth_headers)
         assert response.status_code == 200
@@ -249,7 +265,7 @@ class TestAuthenticatedEndpoints:
 
 
 class TestPasswordManagement:
-    def test_change_password(self, auth_headers):
+    def test_change_password(self, client, auth_headers):
         """Test changing password"""
         response = client.post(
             "/api/auth/change-password",
@@ -269,7 +285,7 @@ class TestPasswordManagement:
         )
         assert response.status_code == 200
     
-    def test_change_password_wrong_current(self, auth_headers):
+    def test_change_password_wrong_current(self, client, auth_headers):
         """Test changing password with wrong current password"""
         response = client.post(
             "/api/auth/change-password",
@@ -282,7 +298,7 @@ class TestPasswordManagement:
         assert response.status_code == 400
         assert "Incorrect current password" in response.json()["detail"]
     
-    def test_password_reset_request(self, test_user):
+    def test_password_reset_request(self, client, test_user):
         """Test password reset request"""
         response = client.post(
             "/api/auth/password-reset-request",
@@ -291,7 +307,7 @@ class TestPasswordManagement:
         assert response.status_code == 200
         assert "password reset link has been sent" in response.json()["message"]
     
-    def test_password_reset_request_unknown_email(self, test_db):
+    def test_password_reset_request_unknown_email(self, client, test_db):
         """Test password reset request with unknown email"""
         response = client.post(
             "/api/auth/password-reset-request",
@@ -303,7 +319,7 @@ class TestPasswordManagement:
 
 
 class TestSessionManagement:
-    def test_update_session_duration(self, auth_headers):
+    def test_update_session_duration(self, client, auth_headers):
         """Test updating session duration"""
         response = client.put(
             "/api/auth/session-duration",
@@ -313,7 +329,7 @@ class TestSessionManagement:
         assert response.status_code == 200
         assert response.json()["session_duration_hours"] == 8
     
-    def test_update_session_duration_invalid(self, auth_headers):
+    def test_update_session_duration_invalid(self, client, auth_headers):
         """Test updating session duration with invalid value"""
         # Too high
         response = client.put(
@@ -333,18 +349,18 @@ class TestSessionManagement:
 
 
 class TestProtectedEndpoints:
-    def test_accounts_endpoint_authenticated(self, auth_headers):
+    def test_accounts_endpoint_authenticated(self, client, auth_headers):
         """Test accessing accounts endpoint with authentication"""
         response = client.get("/api/accounts", headers=auth_headers)
         assert response.status_code == 200
         assert isinstance(response.json(), list)
     
-    def test_accounts_endpoint_unauthenticated(self, test_db):
+    def test_accounts_endpoint_unauthenticated(self, client, test_db):
         """Test accessing accounts endpoint without authentication"""
         response = client.get("/api/accounts")
         assert response.status_code == 401
     
-    def test_accounts_summary_authenticated(self, auth_headers):
+    def test_accounts_summary_authenticated(self, client, auth_headers):
         """Test accessing accounts summary with authentication"""
         response = client.get("/api/accounts/summary", headers=auth_headers)
         assert response.status_code == 200
@@ -352,7 +368,7 @@ class TestProtectedEndpoints:
         assert "total_accounts" in data
         assert "by_status" in data
     
-    def test_accounts_summary_unauthenticated(self, test_db):
+    def test_accounts_summary_unauthenticated(self, client, test_db):
         """Test accessing accounts summary without authentication"""
         response = client.get("/api/accounts/summary")
         assert response.status_code == 401

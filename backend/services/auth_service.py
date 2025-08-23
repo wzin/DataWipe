@@ -114,8 +114,7 @@ class AuthService:
         
         return user
     
-    @staticmethod
-    def create_user(db: Session, username: str, email: str, password: str, 
+    def create_user(self, db: Session, username: str, email: str, password: str, 
                    session_duration_hours: int = 24, is_superuser: bool = False) -> User:
         """Create a new user"""
         # Check if user already exists
@@ -136,7 +135,7 @@ class AuthService:
                 )
         
         # Create new user
-        hashed_password = AuthService.get_password_hash(password)
+        hashed_password = self.get_password_hash(password)
         user = User(
             username=username,
             email=email,
