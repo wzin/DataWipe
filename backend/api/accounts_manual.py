@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 from database import get_db
 from models import User, Account, AccountStatus
 from services.encryption_service import encryption_service
+from services.categorization_service import categorization_service
 from api.auth import get_current_active_user
 from services.audit_service import AuditService
 
@@ -90,7 +91,19 @@ async def create_manual_account(
                 detail=f"Account already exists for {account_data.site_name}"
             )
         
-        # Create new account with encrypted password
+        # Auto-categorize the account
+        category_info = categorization_service.categorize_account(
+            account_data.site_name,
+            account_data.site_url
+        )
+        
+        # Assess deletion priority
+        priority_score, _ = categorization_service.assess_deletion_priority(
+            category_info['category'],
+            category_info['risk_level']
+        )
+        
+        # Create new account with encrypted password and category
         new_account = Account(
             user_id=current_user.id,
             site_name=account_data.site_name,
@@ -98,7 +111,12 @@ async def create_manual_account(
             username=account_data.username,
             encrypted_password=encryption_service.encrypt_password(account_data.password),
             email=account_data.email or "",
-            status=AccountStatus.DISCOVERED
+            status=AccountStatus.DISCOVERED,
+            category=category_info['category'],
+            category_confidence=category_info['confidence'],
+            risk_level=category_info['risk_level'],
+            data_sensitivity=category_info['data_sensitivity'],
+            deletion_priority=priority_score
         )
         
         # Add notes if provided

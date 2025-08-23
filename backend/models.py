@@ -77,6 +77,13 @@ class Account(Base):
     site_url = Column(String, nullable=False)
     username = Column(String, nullable=False)
     encrypted_password = Column(Text, nullable=False)  # Encrypted password using AES
+    
+    # Categorization fields
+    category = Column(String, default="other")
+    category_confidence = Column(Float, default=0.5)
+    risk_level = Column(String, default="medium")
+    data_sensitivity = Column(String, default="medium")
+    deletion_priority = Column(Integer, default=5)
     email = Column(String)
     status = Column(Enum(AccountStatus), default=AccountStatus.DISCOVERED)
     created_at = Column(DateTime, default=func.now())

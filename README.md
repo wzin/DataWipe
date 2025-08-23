@@ -4,15 +4,23 @@ A comprehensive web application that helps users manage and delete their account
 
 ## 🚀 Features
 
-- **CSV Account Upload**: Import accounts from CSV files:
-  - Lastpass and Bitwarden accounts supported
-- **Account Management**: View, search, and organize discovered accounts
-- **Deletion Workflow**: Automated account deletion tasks
-- **Audit Trail**: Complete logging and audit functionality
-- **Email Integration**: SMTP support for automated communications
-  - supports SMTP and IMAP gateway with credentials (e.g. google apps passwords)
-- **Responsive Design**: Works on desktop, tablet, and mobile
-- **API Documentation**: Complete OpenAPI/Swagger documentation
+### Core Features
+- **🔐 User Authentication**: JWT-based auth with configurable sessions (1-24h)
+- **🔒 Password Encryption**: AES-256 encryption for all stored passwords
+- **📁 CSV Import with Auto-Detection**: Supports 10+ password managers
+  - Bitwarden, LastPass, 1Password, Chrome, Firefox, KeePass, Dashlane, NordPass, RoboForm, Enpass
+- **➕ Manual Account Entry**: Add individual accounts with auto-categorization
+- **🏷️ Smart Categorization**: Auto-categorize accounts by type and risk level
+  - 13 categories: Social Media, Finance, Shopping, Entertainment, etc.
+  - Risk assessment: Critical, High, Medium, Low
+- **🤖 Web Automation**: Playwright-based deletion for 15+ popular sites
+- **📧 Email Integration**: GDPR-compliant deletion requests
+  - SMTP auto-detection for major providers
+  - IMAP monitoring for responses
+  - Follow-up and complaint templates
+- **📊 Audit Trail**: Complete activity logging and compliance tracking
+- **📱 Responsive Design**: Works on desktop, tablet, and mobile
+- **📖 API Documentation**: Complete OpenAPI/Swagger documentation
 
 ## 🏗️ Architecture
 
@@ -98,19 +106,37 @@ account-deleter2/
 
 ## 🧪 Testing
 
-### Run E2E Tests
+### Comprehensive Test Suite
+DataWipe includes a complete test suite that runs inside Docker containers.
+
+#### Run All Tests
 ```bash
-./run_selenium_tests.sh
+# Run complete test suite
+./run_tests.sh
+
+# Run specific test categories
+./run_tests.sh quick       # Quick unit tests only
+./run_tests.sh backend     # All backend tests
+./run_tests.sh integration # Integration tests
+./run_tests.sh e2e        # End-to-end tests
 ```
 
-### Run Individual Tests
-```bash
-# Test specific functionality
-python test_network_error.py
+#### Test Coverage
+- **Unit Tests**: Authentication, encryption, CSV parsing, categorization
+- **Integration Tests**: Database, services, API endpoints
+- **E2E Tests**: Full user workflows with Selenium
+- **API Tests**: All REST endpoints with auth
 
-# Test API endpoints
-curl http://localhost:8000/api/accounts/summary
-curl http://localhost:8000/api/accounts
+#### Manual Testing
+```bash
+# Test API health
+curl http://localhost:8000/health
+
+# View API documentation
+open http://localhost:8000/docs
+
+# Run specific test file in Docker
+docker compose exec backend python -m pytest tests/test_auth.py -v
 ```
 
 ## 📊 API Endpoints

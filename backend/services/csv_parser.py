@@ -8,6 +8,7 @@ import re
 
 from models import Account, AccountStatus
 from services.encryption_service import encryption_service
+from services.categorization_service import categorization_service
 
 
 class CSVParser:
@@ -445,7 +446,19 @@ class CSVParser:
             db.commit()
             return existing
         
-        # Create new account with encrypted password
+        # Auto-categorize the account
+        category_info = categorization_service.categorize_account(
+            account_data['site_name'],
+            account_data['site_url']
+        )
+        
+        # Assess deletion priority
+        priority_score, _ = categorization_service.assess_deletion_priority(
+            category_info['category'],
+            category_info['risk_level']
+        )
+        
+        # Create new account with encrypted password and category
         account = Account(
             user_id=user_id,
             site_name=account_data['site_name'],
@@ -453,7 +466,12 @@ class CSVParser:
             username=account_data['username'],
             encrypted_password=encryption_service.encrypt_password(account_data['password']),
             email=account_data.get('email', ''),
-            status=AccountStatus.DISCOVERED
+            status=AccountStatus.DISCOVERED,
+            category=category_info['category'],
+            category_confidence=category_info['confidence'],
+            risk_level=category_info['risk_level'],
+            data_sensitivity=category_info['data_sensitivity'],
+            deletion_priority=priority_score
         )
         
         db.add(account)
