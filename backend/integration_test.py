@@ -1,5 +1,6 @@
 import asyncio
 import sys
+import pytest
 sys.path.append('/app')
 
 from database import init_db, get_db
@@ -7,6 +8,7 @@ from services.encryption_service import encryption_service
 from services.categorization_service import categorization_service
 from services.csv_parser import CSVParser
 
+@pytest.mark.asyncio
 async def test_integration():
     print("Testing database connection...")
     init_db()

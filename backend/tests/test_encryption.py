@@ -89,13 +89,18 @@ class TestEncryptionService:
     
     def test_key_rotation(self):
         """Test rotating encryption keys"""
+        import os
+        from cryptography.fernet import Fernet
+        
         # Create a new service with a specific key
         old_key = EncryptionService.generate_encryption_key()
         new_key = EncryptionService.generate_encryption_key()
         
         # Create service with old key
+        old_env_key = os.environ.get("ENCRYPTION_KEY")
+        os.environ["ENCRYPTION_KEY"] = old_key
         old_service = EncryptionService()
-        old_service.fernet = old_service._get_or_create_fernet()
+        old_service.fernet = Fernet(old_key.encode())
         
         # Encrypt with old key
         original_data = "Sensitive data to rotate"
@@ -107,12 +112,18 @@ class TestEncryptionService:
         )
         
         # Create service with new key and decrypt
-        new_service = EncryptionService()
         os.environ["ENCRYPTION_KEY"] = new_key
-        new_service.fernet = new_service._get_or_create_fernet()
+        new_service = EncryptionService()
+        new_service.fernet = Fernet(new_key.encode())
         
         decrypted = new_service.decrypt_data(rotated_data)
         assert decrypted == original_data
+        
+        # Restore original env key
+        if old_env_key:
+            os.environ["ENCRYPTION_KEY"] = old_env_key
+        else:
+            os.environ.pop("ENCRYPTION_KEY", None)
     
     def test_generate_encryption_key(self):
         """Test generating new encryption keys"""

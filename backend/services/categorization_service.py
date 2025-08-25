@@ -252,18 +252,20 @@ class CategorizationService:
                 return ''
             
             # Handle invalid URLs that don't look like domains
-            if not '.' in url and not url.startswith(('http://', 'https://')):
+            url_lower = url.lower()
+            if not '.' in url and not url_lower.startswith(('http://', 'https://')):
                 return ''
             
-            if not url.startswith(('http://', 'https://')):
+            if not url_lower.startswith(('http://', 'https://')):
                 url = f'https://{url}'
             
-            parsed = urlparse(url)
+            # Parse lowercase URL to handle uppercase schemes
+            parsed = urlparse(url.lower())
             domain = parsed.netloc.lower()
             
             if not domain:
-                # If no netloc, try to extract from path
-                domain = url.replace('https://', '').replace('http://', '').split('/')[0]
+                # If no netloc, try to extract from path (case-insensitive)
+                domain = url.lower().replace('https://', '').replace('http://', '').split('/')[0]
             
             # Remove www prefix
             if domain.startswith('www.'):

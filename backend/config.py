@@ -5,7 +5,7 @@ import os
 
 class Settings(BaseSettings):
     # Database
-    database_url: str = "sqlite:///./data/accounts.db"
+    database_url: str = os.getenv("DATABASE_URL", "sqlite:///./data/accounts.db")
     
     # LLM APIs
     openai_api_key: Optional[str] = None

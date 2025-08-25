@@ -65,7 +65,10 @@ async def get_accounts(
 
 
 @router.get("/accounts/summary")
-async def get_accounts_summary(db: Session = Depends(get_db)):
+async def get_accounts_summary(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
     """Get summary statistics for accounts"""
     
     from sqlalchemy import func
@@ -73,7 +76,7 @@ async def get_accounts_summary(db: Session = Depends(get_db)):
     summary = db.query(
         Account.status,
         func.count(Account.id).label('count')
-    ).group_by(Account.status).all()
+    ).filter(Account.user_id == current_user.id).group_by(Account.status).all()
     
     # Convert to dict
     status_counts = {status.value: 0 for status in AccountStatus}
@@ -87,10 +90,17 @@ async def get_accounts_summary(db: Session = Depends(get_db)):
 
 
 @router.get("/accounts/{account_id:int}", response_model=AccountResponse)
-async def get_account(account_id: int, db: Session = Depends(get_db)):
+async def get_account(
+    account_id: int, 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
     """Get specific account details"""
     
-    account = db.query(Account).filter(Account.id == account_id).first()
+    account = db.query(Account).filter(
+        Account.id == account_id,
+        Account.user_id == current_user.id
+    ).first()
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
     
@@ -101,7 +111,8 @@ async def get_account(account_id: int, db: Session = Depends(get_db)):
 async def update_account(
     account_id: int,
     account_update: AccountUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """Update account information"""
     
@@ -136,7 +147,11 @@ async def update_account(
 
 
 @router.delete("/accounts/{account_id:int}")
-async def delete_account(account_id: int, db: Session = Depends(get_db)):
+async def delete_account(
+    account_id: int, 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
     """Remove account from system (not from the actual service)"""
     
     account = db.query(Account).filter(
